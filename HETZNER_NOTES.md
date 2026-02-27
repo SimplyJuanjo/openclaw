@@ -60,3 +60,30 @@ docker compose run --rm -T openclaw-cli config get update.auto.enabled
 ls -lah /mnt/openclaw
 find /mnt/openclaw -maxdepth 2 -type f | rg -i 'backup|snapshot|tar|gz|zst' || true
 ```
+
+## Hands-Free Persistence (Codex + Self-Improve)
+
+After any pull/rebuild, re-apply the owner hands-free profile:
+
+```bash
+cd /opt/openclaw
+bash notes/hetzner-setup/self-improve/apply-owner-handsfree.sh +346XXXXXXXX
+```
+
+This keeps:
+
+- owner-only command execution on WhatsApp
+- `tools.exec.security=full`
+- `tools.exec.ask=off`
+- `approvals.exec.enabled=false`
+
+Full update checklist (including rebuild args + smoke checks):
+
+- `notes/hetzner-setup/self-improve/UPDATE_HANDS_FREE_RUNBOOK.md`
+
+One-shot updater (recommended):
+
+```bash
+cd /opt/openclaw
+bash notes/hetzner-setup/self-improve/deploy-self-improve-update.sh +346XXXXXXXX
+```

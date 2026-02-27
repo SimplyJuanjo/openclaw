@@ -121,6 +121,19 @@ Update this file after each relevant session.
 - `apply-owner-guardrails.sh` to enforce owner-only operational control and approval forwarding.
 - `README.md` runbook with preflight, deployment, WhatsApp commands, and acceptance checks.
 
+### 2026-02-27 (hands-free persistence and update runbook)
+
+- Added `apply-owner-handsfree.sh` to enforce owner-only control with hands-free exec defaults:
+- `tools.exec.security=full`
+- `tools.exec.ask=off`
+- `approvals.exec.enabled=false`
+- Added `UPDATE_HANDS_FREE_RUNBOOK.md` with exact post-update steps:
+- pull/rebuild with `OPENCLAW_DOCKER_APT_PACKAGES="git gh jq"`
+- recreate with compose override stack
+- reapply hands-free profile
+- run smoke checks (`codex`, `gh`, exec policy keys)
+- Added `deploy-self-improve-update.sh` one-shot command for update + rebuild + profile reapply + smoke checks.
+
 ### Entry Template
 
 - `YYYY-MM-DD`
@@ -144,7 +157,8 @@ Update this file after each relevant session.
 - Cala skill is installed; env key is loaded, but provider responses are currently inconsistent/time out in some runs.
 - Backups and healthcheck cron jobs are active and producing expected outputs.
 - Public port scans on SSH are present (expected for internet-exposed SSH); gateway ports are not reachable from local public test.
-- Self-improve supervised automation kit is prepared in repo and pending deployment on VPS.
+- Self-improve kit now includes both supervised and hands-free operation profiles.
+- Update-safe runbook exists for post-pull/post-rebuild recovery of hands-free behavior.
 
 ## Next Steps
 
@@ -154,7 +168,7 @@ Update this file after each relevant session.
 4. Decide container strategy for optional CLIs: bind-mount host binaries or bake into image.
 5. Continue Cala troubleshooting as reliability/API timeout issue (not env loss).
 6. Optional hardening: move from `bind=lan` to `bind=tailnet` or `loopback + tailscale serve`.
-7. Deploy and validate `notes/hetzner-setup/self-improve/` on VPS (`start/status/logs` + Draft PR E2E).
+7. Keep running periodic self-improve E2E (`start/status/logs`) after each major update to confirm hands-free stability.
 
 ## Notes
 

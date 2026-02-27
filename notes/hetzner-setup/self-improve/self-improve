@@ -1,0 +1,525 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROGRAM_NAME="${0##*/}"
+PROGRAM_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+RUNS_DIR="${SELF_IMPROVE_RUNS_DIR:-/opt/host-tools/runs}"
+WORK_DIR="${SELF_IMPROVE_WORK_DIR:-${RUNS_DIR}/work}"
+LOCK_FILE="${SELF_IMPROVE_LOCK_FILE:-${RUNS_DIR}/self-improve.lock}"
+REPO_SOURCE_DIR="${SELF_IMPROVE_REPO_SOURCE_DIR:-/opt/openclaw-host}"
+CODEX_BIN="${SELF_IMPROVE_CODEX_BIN:-/opt/host-tools/npm-global/bin/codex}"
+GH_BIN="${SELF_IMPROVE_GH_BIN:-gh}"
+INSTALL_CMD="${SELF_IMPROVE_INSTALL_CMD:-pnpm install --frozen-lockfile}"
+CHECK_CMD="${SELF_IMPROVE_CHECK_CMD:-pnpm check}"
+BUILD_CMD="${SELF_IMPROVE_BUILD_CMD:-pnpm build}"
+BASE_REF="${SELF_IMPROVE_BASE_REF:-upstream/main}"
+BASE_BRANCH="${SELF_IMPROVE_BASE_BRANCH:-main}"
+UPSTREAM_REPO="${SELF_IMPROVE_UPSTREAM_REPO:-openclaw/openclaw}"
+BRANCH_PREFIX="${SELF_IMPROVE_BRANCH_PREFIX:-self-improve}"
+GIT_USER_NAME="${SELF_IMPROVE_GIT_USER_NAME:-openclaw-self-improve[bot]}"
+GIT_USER_EMAIL="${SELF_IMPROVE_GIT_USER_EMAIL:-self-improve@local.invalid}"
+CODEX_MODEL="${SELF_IMPROVE_CODEX_MODEL:-}"
+
+RUN_ID=""
+RUN_GOAL=""
+RUN_STATE=""
+RUN_BRANCH=""
+RUN_HEAD_SHA=""
+RUN_CHECK_STATUS="pending"
+RUN_BUILD_STATUS="pending"
+RUN_PR_URL=""
+RUN_SUMMARY=""
+RUN_ERROR=""
+RUN_CREATED_AT=""
+RUN_UPDATED_AT=""
+RUN_LOG_PATH=""
+RUN_WORKSPACE_PATH=""
+RUN_META_PATH=""
+RUN_GOAL_PATH=""
+RUN_REPO_DIR=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  self-improve start "<goal>"
+  self-improve status <runId>
+  self-improve logs <runId> [--tail <N>|--all]
+
+Notes:
+  - "start" returns immediately and runs in background.
+  - "status" prints the run contract JSON.
+  - "logs" tails the run log (default 200 lines).
+EOF
+}
+
+fail() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+iso_now() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+require_cmd() {
+  local cmd="$1"
+  if [[ "$cmd" == */* ]]; then
+    [[ -x "$cmd" ]] || fail "Required executable not found: $cmd"
+    return
+  fi
+  command -v "$cmd" >/dev/null 2>&1 || fail "Missing required command: $cmd"
+}
+
+ensure_dirs() {
+  mkdir -p "$RUNS_DIR" "$WORK_DIR"
+}
+
+normalize_goal() {
+  printf '%s' "$1" | tr '\n' ' ' | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//'
+}
+
+parse_github_owner() {
+  local remote_url="$1"
+  if [[ "$remote_url" =~ ^git@github\.com:([^/]+)/[^/]+(\.git)?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$remote_url" =~ ^https://github\.com/([^/]+)/[^/]+(\.git)?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$remote_url" =~ ^ssh://git@github\.com/([^/]+)/[^/]+(\.git)?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+write_metadata() {
+  RUN_UPDATED_AT="$(iso_now)"
+  local meta_path="$RUN_META_PATH"
+  META_PATH="$meta_path" \
+    RUN_ID="$RUN_ID" \
+    RUN_GOAL="$RUN_GOAL" \
+    RUN_STATE="$RUN_STATE" \
+    RUN_BRANCH="$RUN_BRANCH" \
+    RUN_HEAD_SHA="$RUN_HEAD_SHA" \
+    RUN_CHECK_STATUS="$RUN_CHECK_STATUS" \
+    RUN_BUILD_STATUS="$RUN_BUILD_STATUS" \
+    RUN_PR_URL="$RUN_PR_URL" \
+    RUN_SUMMARY="$RUN_SUMMARY" \
+    RUN_ERROR="$RUN_ERROR" \
+    RUN_LOG_PATH="$RUN_LOG_PATH" \
+    RUN_WORKSPACE_PATH="$RUN_WORKSPACE_PATH" \
+    RUN_CREATED_AT="$RUN_CREATED_AT" \
+    RUN_UPDATED_AT="$RUN_UPDATED_AT" \
+    node <<'NODE'
+const fs = require("node:fs");
+const env = process.env;
+const toNullable = (value) => (value && value.length > 0 ? value : null);
+const payload = {
+  runId: env.RUN_ID,
+  state: env.RUN_STATE,
+  branch: toNullable(env.RUN_BRANCH),
+  headSha: toNullable(env.RUN_HEAD_SHA),
+  checkStatus: env.RUN_CHECK_STATUS || "pending",
+  buildStatus: env.RUN_BUILD_STATUS || "pending",
+  prUrl: toNullable(env.RUN_PR_URL),
+  summary: toNullable(env.RUN_SUMMARY),
+  error: toNullable(env.RUN_ERROR),
+  goal: toNullable(env.RUN_GOAL),
+  logPath: toNullable(env.RUN_LOG_PATH),
+  workspacePath: toNullable(env.RUN_WORKSPACE_PATH),
+  createdAt: toNullable(env.RUN_CREATED_AT),
+  updatedAt: toNullable(env.RUN_UPDATED_AT),
+};
+fs.writeFileSync(env.META_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+NODE
+}
+
+load_goal() {
+  [[ -f "$RUN_GOAL_PATH" ]] || fail "Missing goal file for run $RUN_ID: $RUN_GOAL_PATH"
+  RUN_GOAL="$(cat "$RUN_GOAL_PATH")"
+}
+
+generate_run_id() {
+  local suffix
+  suffix="$(dd if=/dev/urandom bs=3 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+  printf '%s-%s\n' "$(date -u +"%Y%m%dT%H%M%SZ")" "$suffix"
+}
+
+print_contract() {
+  cat <<EOF
+runId: $RUN_ID
+state: $RUN_STATE
+branch: $RUN_BRANCH
+headSha: ${RUN_HEAD_SHA:-}
+checkStatus: $RUN_CHECK_STATUS
+buildStatus: $RUN_BUILD_STATUS
+prUrl: ${RUN_PR_URL:-}
+summary: ${RUN_SUMMARY:-}
+error: ${RUN_ERROR:-}
+EOF
+}
+
+log() {
+  printf '[%s] %s\n' "$(iso_now)" "$*"
+}
+
+run_in_repo() {
+  local command_text="$1"
+  (
+    cd "$RUN_REPO_DIR"
+    bash -lc "$command_text"
+  )
+}
+
+write_prompt() {
+  local prompt_path="$1"
+  cat >"$prompt_path" <<EOF
+You are operating in a supervised self-improvement run for OpenClaw.
+
+Goal:
+$RUN_GOAL
+
+Mandatory constraints:
+1. Edit only files under this repository: $RUN_REPO_DIR
+2. Do not access or modify secrets, credentials, or files outside the repo.
+3. Keep changes minimal, targeted, and justified by the goal.
+4. Prefer reusing existing code patterns; do not introduce broad refactors.
+5. Ensure the codebase remains buildable and checkable.
+
+Required output behavior:
+- Make the implementation changes needed for the goal.
+- Do not merge to main.
+- Stop after producing repo changes ready for checks and PR.
+- End with a concise summary of what changed and residual risks.
+EOF
+}
+
+write_pr_body() {
+  local pr_body_path="$1"
+  cat >"$pr_body_path" <<EOF
+## Objective
+
+$RUN_GOAL
+
+## Changes
+
+- Automated by \`self-improve\` runner.
+- Scope constrained to repository changes needed for the objective.
+
+## Validation
+
+- \`$CHECK_CMD\` => $RUN_CHECK_STATUS
+- \`$BUILD_CMD\` => $RUN_BUILD_STATUS
+
+## Risks / Regressions
+
+- Review required before merge.
+- Validate runtime behavior in your target deployment after merge.
+
+## Rollback
+
+- Close this draft PR and delete branch \`$RUN_BRANCH\` if not acceptable.
+
+---
+
+Run metadata:
+- runId: \`$RUN_ID\`
+- headSha: \`$RUN_HEAD_SHA\`
+EOF
+}
+
+worker_on_error() {
+  local exit_code=$?
+  local failed_cmd="${BASH_COMMAND:-unknown}"
+  RUN_STATE="failed"
+  RUN_ERROR="Command failed (exit ${exit_code}): ${failed_cmd}"
+  RUN_SUMMARY="Run failed. Inspect logs with: self-improve logs ${RUN_ID} --all"
+  if [[ "$RUN_CHECK_STATUS" == "running" ]]; then
+    RUN_CHECK_STATUS="failed"
+  fi
+  if [[ "$RUN_BUILD_STATUS" == "running" ]]; then
+    RUN_BUILD_STATUS="failed"
+  fi
+  write_metadata
+  print_contract
+  exit "$exit_code"
+}
+
+worker_finalize_success() {
+  RUN_STATE="completed"
+  write_metadata
+  print_contract
+}
+
+worker_main() {
+  RUN_ID="$1"
+  RUN_META_PATH="${RUNS_DIR}/${RUN_ID}.json"
+  RUN_GOAL_PATH="${RUNS_DIR}/${RUN_ID}.goal.txt"
+  RUN_LOG_PATH="${RUNS_DIR}/${RUN_ID}.log"
+  RUN_WORKSPACE_PATH="${WORK_DIR}/${RUN_ID}"
+  RUN_BRANCH="${BRANCH_PREFIX}/${RUN_ID}"
+  RUN_CREATED_AT="$(iso_now)"
+  RUN_CHECK_STATUS="pending"
+  RUN_BUILD_STATUS="pending"
+  RUN_PR_URL=""
+  RUN_ERROR=""
+
+  load_goal
+  RUN_GOAL="$(normalize_goal "$RUN_GOAL")"
+
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    RUN_STATE="failed"
+    RUN_SUMMARY="Another self-improve run is active."
+    RUN_ERROR="Lock busy: $LOCK_FILE"
+    write_metadata
+    print_contract
+    return 1
+  fi
+
+  trap worker_on_error ERR
+
+  RUN_STATE="running"
+  RUN_SUMMARY="Preflight checks."
+  write_metadata
+  log "Starting run ${RUN_ID}."
+
+  ensure_dirs
+  require_cmd git
+  require_cmd node
+  require_cmd pnpm
+  require_cmd flock
+  require_cmd dd
+  require_cmd od
+  require_cmd bash
+  require_cmd "$CODEX_BIN"
+  require_cmd "$GH_BIN"
+
+  [[ -d "$REPO_SOURCE_DIR/.git" ]] || fail "Repository not found at $REPO_SOURCE_DIR"
+  [[ -n "${GH_TOKEN:-}" ]] || fail "GH_TOKEN is not set. Export GH_TOKEN in gateway runtime."
+
+  local origin_url
+  local upstream_url
+  local origin_owner
+  origin_url="$(git -C "$REPO_SOURCE_DIR" remote get-url origin)"
+  upstream_url="$(git -C "$REPO_SOURCE_DIR" remote get-url upstream)"
+  origin_owner="$(parse_github_owner "$origin_url")" || fail "Cannot parse GitHub owner from origin URL: $origin_url"
+
+  rm -rf "$RUN_WORKSPACE_PATH"
+  mkdir -p "$RUN_WORKSPACE_PATH"
+  RUN_REPO_DIR="${RUN_WORKSPACE_PATH}/repo"
+
+  RUN_SUMMARY="Cloning repository workspace."
+  write_metadata
+  log "Cloning from $REPO_SOURCE_DIR to $RUN_REPO_DIR."
+  git clone --quiet "$REPO_SOURCE_DIR" "$RUN_REPO_DIR"
+
+  git -C "$RUN_REPO_DIR" remote remove origin
+  git -C "$RUN_REPO_DIR" remote add origin "$origin_url"
+  if git -C "$RUN_REPO_DIR" remote | grep -xq "upstream"; then
+    git -C "$RUN_REPO_DIR" remote remove upstream
+  fi
+  git -C "$RUN_REPO_DIR" remote add upstream "$upstream_url"
+
+  git -C "$RUN_REPO_DIR" fetch --prune upstream
+  git -C "$RUN_REPO_DIR" checkout -B "$RUN_BRANCH" "$BASE_REF"
+  git -C "$RUN_REPO_DIR" config user.name "$GIT_USER_NAME"
+  git -C "$RUN_REPO_DIR" config user.email "$GIT_USER_EMAIL"
+  RUN_HEAD_SHA="$(git -C "$RUN_REPO_DIR" rev-parse HEAD)"
+  write_metadata
+
+  local prompt_path
+  prompt_path="${RUN_WORKSPACE_PATH}/prompt.txt"
+  write_prompt "$prompt_path"
+
+  RUN_SUMMARY="Running Codex agent."
+  write_metadata
+  log "Executing Codex for goal: $RUN_GOAL"
+  local prompt_text
+  prompt_text="$(cat "$prompt_path")"
+  local -a codex_args
+  codex_args=(exec --json --color never --sandbox workspace-write --skip-git-repo-check)
+  if [[ -n "$CODEX_MODEL" ]]; then
+    codex_args+=(--model "$CODEX_MODEL")
+  fi
+  (
+    cd "$RUN_REPO_DIR"
+    "$CODEX_BIN" "${codex_args[@]}" "$prompt_text"
+  )
+
+  if [[ -z "$(git -C "$RUN_REPO_DIR" status --porcelain)" ]]; then
+    RUN_STATE="completed"
+    RUN_CHECK_STATUS="skipped"
+    RUN_BUILD_STATUS="skipped"
+    RUN_HEAD_SHA="$(git -C "$RUN_REPO_DIR" rev-parse HEAD)"
+    RUN_SUMMARY="No changes generated. Draft PR not created."
+    write_metadata
+    print_contract
+    return 0
+  fi
+
+  RUN_SUMMARY="Installing dependencies."
+  write_metadata
+  log "Running install command: $INSTALL_CMD"
+  run_in_repo "$INSTALL_CMD"
+
+  RUN_CHECK_STATUS="running"
+  RUN_SUMMARY="Running checks."
+  write_metadata
+  log "Running check command: $CHECK_CMD"
+  run_in_repo "$CHECK_CMD"
+  RUN_CHECK_STATUS="passed"
+  write_metadata
+
+  RUN_BUILD_STATUS="running"
+  RUN_SUMMARY="Running build."
+  write_metadata
+  log "Running build command: $BUILD_CMD"
+  run_in_repo "$BUILD_CMD"
+  RUN_BUILD_STATUS="passed"
+  write_metadata
+
+  RUN_SUMMARY="Committing and pushing branch."
+  write_metadata
+  local short_goal
+  short_goal="$(normalize_goal "$RUN_GOAL")"
+  [[ -n "$short_goal" ]] || short_goal="automated update"
+  local commit_subject="chore(self-improve): ${short_goal}"
+  commit_subject="${commit_subject:0:120}"
+  git -C "$RUN_REPO_DIR" add -A
+  if git -C "$RUN_REPO_DIR" diff --cached --quiet; then
+    RUN_STATE="completed"
+    RUN_SUMMARY="No staged changes after checks. Draft PR not created."
+    write_metadata
+    print_contract
+    return 0
+  fi
+  git -C "$RUN_REPO_DIR" commit -m "$commit_subject" -m "runId: $RUN_ID"
+  RUN_HEAD_SHA="$(git -C "$RUN_REPO_DIR" rev-parse HEAD)"
+  git -C "$RUN_REPO_DIR" push -u origin "$RUN_BRANCH"
+
+  RUN_SUMMARY="Creating draft PR."
+  write_metadata
+  local pr_title
+  local pr_body_path
+  pr_title="self-improve: ${short_goal}"
+  pr_title="${pr_title:0:120}"
+  pr_body_path="${RUN_WORKSPACE_PATH}/pr-body.md"
+  write_pr_body "$pr_body_path"
+  RUN_PR_URL="$(
+    "$GH_BIN" pr create \
+      --repo "$UPSTREAM_REPO" \
+      --base "$BASE_BRANCH" \
+      --head "${origin_owner}:${RUN_BRANCH}" \
+      --draft \
+      --title "$pr_title" \
+      --body-file "$pr_body_path"
+  )"
+  RUN_PR_URL="$(printf '%s\n' "$RUN_PR_URL" | tail -n 1)"
+  RUN_SUMMARY="Draft PR created."
+
+  worker_finalize_success
+}
+
+cmd_start() {
+  ensure_dirs
+  local goal_input="$*"
+  [[ -n "${goal_input// }" ]] || fail "Goal is required."
+
+  RUN_ID="$(generate_run_id)"
+  RUN_GOAL="$(normalize_goal "$goal_input")"
+  RUN_STATE="queued"
+  RUN_BRANCH="${BRANCH_PREFIX}/${RUN_ID}"
+  RUN_HEAD_SHA=""
+  RUN_CHECK_STATUS="pending"
+  RUN_BUILD_STATUS="pending"
+  RUN_PR_URL=""
+  RUN_ERROR=""
+  RUN_CREATED_AT="$(iso_now)"
+  RUN_UPDATED_AT="$RUN_CREATED_AT"
+  RUN_LOG_PATH="${RUNS_DIR}/${RUN_ID}.log"
+  RUN_WORKSPACE_PATH="${WORK_DIR}/${RUN_ID}"
+  RUN_META_PATH="${RUNS_DIR}/${RUN_ID}.json"
+  RUN_GOAL_PATH="${RUNS_DIR}/${RUN_ID}.goal.txt"
+  RUN_SUMMARY="Queued."
+
+  printf '%s\n' "$RUN_GOAL" >"$RUN_GOAL_PATH"
+  : >"$RUN_LOG_PATH"
+  write_metadata
+
+  nohup "$PROGRAM_PATH" run "$RUN_ID" >>"$RUN_LOG_PATH" 2>&1 &
+  local worker_pid="$!"
+  RUN_SUMMARY="Queued (pid: ${worker_pid}). Use: self-improve status ${RUN_ID}"
+  write_metadata
+  print_contract
+}
+
+cmd_status() {
+  local run_id="$1"
+  local meta_path="${RUNS_DIR}/${run_id}.json"
+  [[ -f "$meta_path" ]] || fail "Run not found: $run_id"
+  cat "$meta_path"
+}
+
+cmd_logs() {
+  local run_id="$1"
+  local mode="${2:-}"
+  local arg="${3:-}"
+  local log_path="${RUNS_DIR}/${run_id}.log"
+  [[ -f "$log_path" ]] || fail "Log not found for run: $run_id"
+
+  if [[ "$mode" == "--all" ]]; then
+    cat "$log_path"
+    return 0
+  fi
+
+  if [[ "$mode" == "--tail" ]]; then
+    [[ -n "$arg" ]] || fail "Missing line count for --tail"
+    [[ "$arg" =~ ^[0-9]+$ ]] || fail "--tail expects an integer"
+    tail -n "$arg" "$log_path"
+    return 0
+  fi
+
+  if [[ -n "$mode" ]]; then
+    fail "Unknown logs option: $mode"
+  fi
+
+  tail -n 200 "$log_path"
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    start)
+      shift
+      cmd_start "$@"
+      ;;
+    status)
+      shift
+      [[ $# -eq 1 ]] || fail "Usage: $PROGRAM_NAME status <runId>"
+      cmd_status "$1"
+      ;;
+    logs)
+      shift
+      [[ $# -ge 1 && $# -le 3 ]] || fail "Usage: $PROGRAM_NAME logs <runId> [--tail <N>|--all]"
+      cmd_logs "$@"
+      ;;
+    run)
+      shift
+      [[ $# -eq 1 ]] || fail "Internal usage: $PROGRAM_NAME run <runId>"
+      worker_main "$1"
+      ;;
+    "" | -h | --help | help)
+      usage
+      ;;
+    *)
+      fail "Unknown command: $cmd"
+      ;;
+  esac
+}
+
+main "$@"

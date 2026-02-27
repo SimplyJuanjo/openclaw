@@ -1,0 +1,20 @@
+services:
+  openclaw-gateway:
+    environment:
+      GH_TOKEN: ${GH_TOKEN}
+    volumes:
+      - /mnt/openclaw/host-tools/npm-global:/opt/host-tools/npm-global
+      - /mnt/openclaw/host-tools/codex-home:/home/node/.codex
+      - /mnt/openclaw/host-tools/ops:/opt/host-tools/ops
+      - /mnt/openclaw/host-tools/runs:/opt/host-tools/runs
+      - /opt/openclaw:/opt/openclaw-host
+
+  openclaw-cli:
+    environment:
+      GH_TOKEN: ${GH_TOKEN}
+    volumes:
+      - /mnt/openclaw/host-tools/npm-global:/opt/host-tools/npm-global
+      - /mnt/openclaw/host-tools/codex-home:/home/node/.codex
+      - /mnt/openclaw/host-tools/ops:/opt/host-tools/ops
+      - /mnt/openclaw/host-tools/runs:/opt/host-tools/runs
+      - /opt/openclaw:/opt/openclaw-host

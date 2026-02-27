@@ -38,6 +38,7 @@ RUN_WORKSPACE_PATH=""
 RUN_META_PATH=""
 RUN_GOAL_PATH=""
 RUN_REPO_DIR=""
+GIT_SAFE_DIRS=()
 
 usage() {
   cat <<'EOF'
@@ -175,6 +176,15 @@ run_in_repo() {
   )
 }
 
+git_run() {
+  local -a safe_args=()
+  local dir
+  for dir in "${GIT_SAFE_DIRS[@]}"; do
+    safe_args+=(-c "safe.directory=${dir}")
+  done
+  git "${safe_args[@]}" "$@"
+}
+
 write_prompt() {
   local prompt_path="$1"
   cat >"$prompt_path" <<EOF
@@ -305,8 +315,9 @@ worker_main() {
   local origin_url
   local upstream_url
   local origin_owner
-  origin_url="$(git -C "$REPO_SOURCE_DIR" remote get-url origin)"
-  upstream_url="$(git -C "$REPO_SOURCE_DIR" remote get-url upstream)"
+  GIT_SAFE_DIRS=("$REPO_SOURCE_DIR" "$REPO_SOURCE_DIR/.git")
+  origin_url="$(git_run -C "$REPO_SOURCE_DIR" remote get-url origin)"
+  upstream_url="$(git_run -C "$REPO_SOURCE_DIR" remote get-url upstream)"
   origin_owner="$(parse_github_owner "$origin_url")" || fail "Cannot parse GitHub owner from origin URL: $origin_url"
 
   rm -rf "$RUN_WORKSPACE_PATH"
@@ -316,20 +327,23 @@ worker_main() {
   RUN_SUMMARY="Cloning repository workspace."
   write_metadata
   log "Cloning from $REPO_SOURCE_DIR to $RUN_REPO_DIR."
-  git clone --quiet "$REPO_SOURCE_DIR" "$RUN_REPO_DIR"
+  git_run clone --quiet "$REPO_SOURCE_DIR" "$RUN_REPO_DIR"
+  GIT_SAFE_DIRS+=("$RUN_REPO_DIR" "$RUN_REPO_DIR/.git")
 
-  git -C "$RUN_REPO_DIR" remote remove origin
-  git -C "$RUN_REPO_DIR" remote add origin "$origin_url"
-  if git -C "$RUN_REPO_DIR" remote | grep -xq "upstream"; then
-    git -C "$RUN_REPO_DIR" remote remove upstream
+  git_run -C "$RUN_REPO_DIR" remote remove origin
+  git_run -C "$RUN_REPO_DIR" remote add origin "$origin_url"
+  if git_run -C "$RUN_REPO_DIR" remote | grep -xq "upstream"; then
+    git_run -C "$RUN_REPO_DIR" remote remove upstream
   fi
-  git -C "$RUN_REPO_DIR" remote add upstream "$upstream_url"
+  git_run -C "$RUN_REPO_DIR" remote add upstream "$upstream_url"
 
-  git -C "$RUN_REPO_DIR" fetch --prune upstream
-  git -C "$RUN_REPO_DIR" checkout -B "$RUN_BRANCH" "$BASE_REF"
-  git -C "$RUN_REPO_DIR" config user.name "$GIT_USER_NAME"
-  git -C "$RUN_REPO_DIR" config user.email "$GIT_USER_EMAIL"
-  RUN_HEAD_SHA="$(git -C "$RUN_REPO_DIR" rev-parse HEAD)"
+  git_run -C "$RUN_REPO_DIR" fetch --prune upstream
+  git_run -C "$RUN_REPO_DIR" checkout -B "$RUN_BRANCH" "$BASE_REF"
+  git_run -C "$RUN_REPO_DIR" config user.name "$GIT_USER_NAME"
+  git_run -C "$RUN_REPO_DIR" config user.email "$GIT_USER_EMAIL"
+  local base_head_sha
+  base_head_sha="$(git_run -C "$RUN_REPO_DIR" rev-parse HEAD)"
+  RUN_HEAD_SHA="$base_head_sha"
   write_metadata
 
   local prompt_path
@@ -351,15 +365,27 @@ worker_main() {
     "$CODEX_BIN" "${codex_args[@]}" "$prompt_text"
   )
 
-  if [[ -z "$(git -C "$RUN_REPO_DIR" status --porcelain)" ]]; then
+  local post_codex_head_sha
+  local has_uncommitted_changes="false"
+  post_codex_head_sha="$(git_run -C "$RUN_REPO_DIR" rev-parse HEAD)"
+  RUN_HEAD_SHA="$post_codex_head_sha"
+  if [[ -n "$(git_run -C "$RUN_REPO_DIR" status --porcelain)" ]]; then
+    has_uncommitted_changes="true"
+  fi
+
+  if [[ "$has_uncommitted_changes" == "false" && "$post_codex_head_sha" == "$base_head_sha" ]]; then
     RUN_STATE="completed"
     RUN_CHECK_STATUS="skipped"
     RUN_BUILD_STATUS="skipped"
-    RUN_HEAD_SHA="$(git -C "$RUN_REPO_DIR" rev-parse HEAD)"
     RUN_SUMMARY="No changes generated. Draft PR not created."
     write_metadata
     print_contract
     return 0
+  fi
+
+  if [[ "$has_uncommitted_changes" == "false" && "$post_codex_head_sha" != "$base_head_sha" ]]; then
+    RUN_SUMMARY="Codex produced committed changes. Proceeding with checks and Draft PR."
+    write_metadata
   fi
 
   RUN_SUMMARY="Installing dependencies."
@@ -388,19 +414,27 @@ worker_main() {
   local short_goal
   short_goal="$(normalize_goal "$RUN_GOAL")"
   [[ -n "$short_goal" ]] || short_goal="automated update"
-  local commit_subject="chore(self-improve): ${short_goal}"
-  commit_subject="${commit_subject:0:120}"
-  git -C "$RUN_REPO_DIR" add -A
-  if git -C "$RUN_REPO_DIR" diff --cached --quiet; then
-    RUN_STATE="completed"
-    RUN_SUMMARY="No staged changes after checks. Draft PR not created."
-    write_metadata
-    print_contract
-    return 0
+  if [[ -n "$(git_run -C "$RUN_REPO_DIR" status --porcelain)" ]]; then
+    local commit_subject="chore(self-improve): ${short_goal}"
+    commit_subject="${commit_subject:0:120}"
+    git_run -C "$RUN_REPO_DIR" add -A
+    if git_run -C "$RUN_REPO_DIR" diff --cached --quiet; then
+      fail "Expected staged changes but index is empty after git add."
+    fi
+    git_run -C "$RUN_REPO_DIR" commit -m "$commit_subject" -m "runId: $RUN_ID"
+    RUN_HEAD_SHA="$(git_run -C "$RUN_REPO_DIR" rev-parse HEAD)"
+  else
+    RUN_HEAD_SHA="$(git_run -C "$RUN_REPO_DIR" rev-parse HEAD)"
+    if [[ "$RUN_HEAD_SHA" == "$base_head_sha" ]]; then
+      RUN_STATE="completed"
+      RUN_SUMMARY="No changes available for commit after checks. Draft PR not created."
+      write_metadata
+      print_contract
+      return 0
+    fi
+    log "Using existing committed changes at HEAD $RUN_HEAD_SHA"
   fi
-  git -C "$RUN_REPO_DIR" commit -m "$commit_subject" -m "runId: $RUN_ID"
-  RUN_HEAD_SHA="$(git -C "$RUN_REPO_DIR" rev-parse HEAD)"
-  git -C "$RUN_REPO_DIR" push -u origin "$RUN_BRANCH"
+  git_run -C "$RUN_REPO_DIR" push -u origin "$RUN_BRANCH"
 
   RUN_SUMMARY="Creating draft PR."
   write_metadata

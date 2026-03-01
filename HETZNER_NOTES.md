@@ -20,6 +20,7 @@
   - Skill uses workspace `todoist` with `primaryEnv=TODOIST_API_TOKEN`.
 - `gog` is mounted persistently into containers at `/usr/local/bin/gog` (host source: `/mnt/openclaw/host-tools/npm-global/bin/gog`).
 - `gog` keyring is configured to persistent file backend (`/home/node/.openclaw/gogcli/config.json`) and `GOG_KEYRING_PASSWORD` is stored in OpenClaw config env.
+- Compose override exports `GOG_KEYRING_PASSWORD` + `GOG_ACCOUNT` explicitly to avoid stale image `.env` precedence during runtime (`dotenv` loads `/app/.env` first).
 
 ## Incident Log
 
@@ -42,6 +43,16 @@
   - Re-set valid token in runtime config.
   - Updated workspace skill metadata to OpenClaw schema and kept requirements (`bins: todoist`, `env: TODOIST_API_TOKEN`).
 - Result: direct auth probe with real persisted token returns `TODOIST_AUTH_OK`.
+
+### 2026-03-01 - `gog` keyring password mismatch (`aes.KeyUnwrap` failure)
+
+- Symptom: WhatsApp smoke run failed with `aes.KeyUnwrap(): integrity check failed`.
+- Cause: runtime read a stale `GOG_KEYRING_PASSWORD` from image-local `/app/.env` (loaded first by `dotenv`), while keyring tokens were encrypted with the newer password stored in OpenClaw config.
+- Fixes applied:
+  - Synced runtime `.env` values to the active config password/account.
+  - Exported `GOG_KEYRING_PASSWORD` and `GOG_ACCOUNT` explicitly in compose override for `openclaw-gateway` and `openclaw-cli`.
+  - Recreated containers.
+- Result: in-container `gog auth list` and `gog gmail search` succeed without manual env injection.
 
 ## Quick Verification
 

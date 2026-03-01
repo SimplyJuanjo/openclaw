@@ -4,6 +4,8 @@ services:
       - "${DOCKER_SOCK_GID:-988}"
     environment:
       GH_TOKEN: ${GH_TOKEN}
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD}
+      GOG_ACCOUNT: ${GOG_ACCOUNT}
       XDG_CONFIG_HOME: /home/node/.openclaw
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
@@ -22,6 +24,8 @@ services:
       - "${DOCKER_SOCK_GID:-988}"
     environment:
       GH_TOKEN: ${GH_TOKEN}
+      GOG_KEYRING_PASSWORD: ${GOG_KEYRING_PASSWORD}
+      GOG_ACCOUNT: ${GOG_ACCOUNT}
       XDG_CONFIG_HOME: /home/node/.openclaw
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:

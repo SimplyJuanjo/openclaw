@@ -158,6 +158,22 @@ docker compose \
 
 If this passes, Todoist skill dependencies survived the update.
 
+If this fails with `todoist: not found`, check effective compose config and runtime env:
+
+```bash
+cd /opt/openclaw
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.self-improve.override.yml \
+  config | rg -n "host-tools/npm-global|PATH"
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.self-improve.override.yml \
+  exec -T openclaw-gateway \
+  sh -lc 'echo "$PATH"; ls -l /opt/host-tools/npm-global/bin/todoist'
+```
+
 ## 7) If exec gets stuck again
 
 Run:

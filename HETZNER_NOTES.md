@@ -120,3 +120,13 @@ cd /opt/openclaw
 docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml \
   exec -T openclaw-gateway sh -lc 'which todoist && todoist --version'
 ```
+
+If you still get `todoist: not found`, verify effective compose env and mounts:
+
+```bash
+cd /opt/openclaw
+docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml \
+  config | rg -n "host-tools/npm-global|PATH"
+docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml \
+  exec -T openclaw-gateway sh -lc 'echo "$PATH"; ls -l /opt/host-tools/npm-global/bin/todoist'
+```

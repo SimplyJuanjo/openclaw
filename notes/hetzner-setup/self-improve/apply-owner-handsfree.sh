@@ -9,6 +9,11 @@ SELF_IMPROVE_CODEX_BIN="${SELF_IMPROVE_CODEX_BIN:-/opt/host-tools/npm-global/bin
 SELF_IMPROVE_CODEX_MODEL="${SELF_IMPROVE_CODEX_MODEL:-gpt-5-codex}"
 SELF_IMPROVE_CODEX_HOME="${SELF_IMPROVE_CODEX_HOME:-/home/node/.codex}"
 SELF_IMPROVE_CODEX_HOME_HOST="${SELF_IMPROVE_CODEX_HOME_HOST:-/mnt/openclaw/host-tools/codex-home}"
+TOOLS_EXEC_TIMEOUT_SEC="${TOOLS_EXEC_TIMEOUT_SEC:-7200}"
+SELF_IMPROVE_CODEX_TIMEOUT_SEC="${SELF_IMPROVE_CODEX_TIMEOUT_SEC:-5400}"
+SELF_IMPROVE_INSTALL_TIMEOUT_SEC="${SELF_IMPROVE_INSTALL_TIMEOUT_SEC:-3600}"
+SELF_IMPROVE_CHECK_TIMEOUT_SEC="${SELF_IMPROVE_CHECK_TIMEOUT_SEC:-3600}"
+SELF_IMPROVE_BUILD_TIMEOUT_SEC="${SELF_IMPROVE_BUILD_TIMEOUT_SEC:-5400}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -67,6 +72,7 @@ run_cli config set tools.elevated.allowFrom.whatsapp "$owner_json" --strict-json
 
 run_cli config set tools.exec.security full
 run_cli config set tools.exec.ask off
+run_cli config set tools.exec.timeoutSec "$TOOLS_EXEC_TIMEOUT_SEC"
 run_cli config set approvals.exec.enabled false
 run_cli config set tools.exec.pathPrepend '["/opt/host-tools/npm-global/bin","/home/node/.openclaw/bin"]' --strict-json
 
@@ -88,6 +94,10 @@ run_cli config set env.vars.SELF_IMPROVE_CODEX_BIN "$SELF_IMPROVE_CODEX_BIN"
 run_cli config set env.vars.SELF_IMPROVE_CODEX_MODEL "$SELF_IMPROVE_CODEX_MODEL"
 run_cli config set env.vars.SELF_IMPROVE_CODEX_HOME "$SELF_IMPROVE_CODEX_HOME"
 run_cli config set env.vars.SELF_IMPROVE_CODEX_HOME_HOST "$SELF_IMPROVE_CODEX_HOME_HOST"
+run_cli config set env.vars.SELF_IMPROVE_CODEX_TIMEOUT_SEC "\"$SELF_IMPROVE_CODEX_TIMEOUT_SEC\"" --strict-json
+run_cli config set env.vars.SELF_IMPROVE_INSTALL_TIMEOUT_SEC "\"$SELF_IMPROVE_INSTALL_TIMEOUT_SEC\"" --strict-json
+run_cli config set env.vars.SELF_IMPROVE_CHECK_TIMEOUT_SEC "\"$SELF_IMPROVE_CHECK_TIMEOUT_SEC\"" --strict-json
+run_cli config set env.vars.SELF_IMPROVE_BUILD_TIMEOUT_SEC "\"$SELF_IMPROVE_BUILD_TIMEOUT_SEC\"" --strict-json
 
 mkdir -p "$CONFIG_DIR"
 chown 1000:1000 "$CONFIG_DIR" 2>/dev/null || true
@@ -104,6 +114,7 @@ Hands-free profile applied.
 Behavior:
 - Only owner can run /bash and elevated tools.
 - Exec host policy is full + ask off.
+- Exec timeout is pinned to ${TOOLS_EXEC_TIMEOUT_SEC}s.
 - Approval forwarding is disabled.
 - exec-approvals.json was deleted so gateway regenerates a clean file.
 
@@ -112,4 +123,5 @@ Quick verify:
   docker compose ${compose_files[*]} run --rm -T openclaw-cli config get commands.allowFrom.whatsapp
   docker compose ${compose_files[*]} run --rm -T openclaw-cli config get tools.exec.security
   docker compose ${compose_files[*]} run --rm -T openclaw-cli config get tools.exec.ask
+  docker compose ${compose_files[*]} run --rm -T openclaw-cli config get tools.exec.timeoutSec
 EOF

@@ -16,6 +16,7 @@ After each update, preserve:
 - Host Codex auth (`/mnt/openclaw/host-tools/codex-home`).
 - Host runner + run logs (`/mnt/openclaw/host-tools/ops`, `/mnt/openclaw/host-tools/runs`).
 - Compose mounts for host tools + repo mount.
+- Host-debug mounts (`/var/run/docker.sock`, `/host`) for in-container troubleshooting.
 - Owner-only command control from WhatsApp.
 - Hands-free exec profile (`security=full`, `ask=off`, no approval prompts).
 
@@ -39,7 +40,13 @@ git pull --rebase origin main
 cp notes/hetzner-setup/self-improve/docker-compose.self-improve.override.yml \
   ./docker-compose.self-improve.override.yml
 
-export OPENCLAW_DOCKER_APT_PACKAGES="git gh jq"
+export OPENCLAW_DOCKER_APT_PACKAGES="git gh jq iproute2 iputils-ping dnsutils net-tools curl"
+gid="$(stat -c %g /var/run/docker.sock)"
+if rg -q '^DOCKER_SOCK_GID=' .env; then
+  sed -i -E "s/^DOCKER_SOCK_GID=.*/DOCKER_SOCK_GID=${gid}/" .env
+else
+  printf '\nDOCKER_SOCK_GID=%s\n' "$gid" >> .env
+fi
 
 docker compose \
   -f docker-compose.yml \
@@ -73,7 +80,14 @@ docker compose \
   -f docker-compose.override.yml \
   -f docker-compose.self-improve.override.yml \
   exec -T openclaw-gateway \
-  sh -lc '/opt/host-tools/npm-global/bin/codex --version && gh --version'
+  sh -lc '/opt/host-tools/npm-global/bin/codex --version && gh --version && docker --version && ip -V'
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.override.yml \
+  -f docker-compose.self-improve.override.yml \
+  exec -T openclaw-gateway \
+  sh -lc 'test -S /var/run/docker.sock && echo docker-sock-ok; test -d /host && echo host-mount-ok'
 
 docker compose \
   -f docker-compose.yml \
@@ -88,17 +102,30 @@ docker compose \
   -f docker-compose.self-improve.override.yml \
   run --rm -T openclaw-cli \
   config get tools.exec.ask
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.override.yml \
+  -f docker-compose.self-improve.override.yml \
+  run --rm -T openclaw-cli \
+  config get tools.exec.timeoutSec
 ```
 
 Expected:
 
 - `codex --version` works in container.
 - `gh --version` works in container.
+- `docker --version` works in container.
+- `ip -V` works in container.
+- `docker-sock-ok` and `host-mount-ok` are printed.
+- `docker ps` works in container (no socket permission error).
 - `tools.exec.security` is `full`.
 - `tools.exec.ask` is `off`.
+- `tools.exec.timeoutSec` is `7200`.
 - `agents.defaults.cliBackends.codex-cli.command` points to `/opt/host-tools/npm-global/bin/codex`.
 - `agents.defaults.cliBackends.codex-dev.args` contains `--sandbox workspace-write`.
 - `env.vars.SELF_IMPROVE_CODEX_BIN` / `SELF_IMPROVE_CODEX_MODEL` are present.
+- `env.vars.SELF_IMPROVE_*_TIMEOUT_SEC` are present.
 
 ## 5) WhatsApp validation
 
@@ -145,6 +172,8 @@ services:
     environment:
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ```
+
+The same override also mounts `/var/run/docker.sock` and host root at `/host` (read-only).
 
 Then recreate using the same compose stack you normally use.
 

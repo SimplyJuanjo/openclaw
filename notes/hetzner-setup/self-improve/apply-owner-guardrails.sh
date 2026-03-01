@@ -9,6 +9,11 @@ SELF_IMPROVE_CODEX_BIN="${SELF_IMPROVE_CODEX_BIN:-/opt/host-tools/npm-global/bin
 SELF_IMPROVE_CODEX_MODEL="${SELF_IMPROVE_CODEX_MODEL:-gpt-5-codex}"
 SELF_IMPROVE_CODEX_HOME="${SELF_IMPROVE_CODEX_HOME:-/home/node/.codex}"
 SELF_IMPROVE_CODEX_HOME_HOST="${SELF_IMPROVE_CODEX_HOME_HOST:-/mnt/openclaw/host-tools/codex-home}"
+TOOLS_EXEC_TIMEOUT_SEC="${TOOLS_EXEC_TIMEOUT_SEC:-7200}"
+SELF_IMPROVE_CODEX_TIMEOUT_SEC="${SELF_IMPROVE_CODEX_TIMEOUT_SEC:-5400}"
+SELF_IMPROVE_INSTALL_TIMEOUT_SEC="${SELF_IMPROVE_INSTALL_TIMEOUT_SEC:-3600}"
+SELF_IMPROVE_CHECK_TIMEOUT_SEC="${SELF_IMPROVE_CHECK_TIMEOUT_SEC:-3600}"
+SELF_IMPROVE_BUILD_TIMEOUT_SEC="${SELF_IMPROVE_BUILD_TIMEOUT_SEC:-5400}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -59,6 +64,7 @@ run_cli config set commands.allowFrom.whatsapp "$owner_json" --strict-json
 run_cli config set tools.elevated.allowFrom.whatsapp "$owner_json" --strict-json
 run_cli config set tools.exec.security allowlist
 run_cli config set tools.exec.ask always
+run_cli config set tools.exec.timeoutSec "$TOOLS_EXEC_TIMEOUT_SEC"
 run_cli config set approvals.exec.enabled true
 run_cli config set approvals.exec.mode targets
 run_cli config set approvals.exec.targets "$targets_json" --strict-json
@@ -82,6 +88,10 @@ run_cli config set env.vars.SELF_IMPROVE_CODEX_BIN "$SELF_IMPROVE_CODEX_BIN"
 run_cli config set env.vars.SELF_IMPROVE_CODEX_MODEL "$SELF_IMPROVE_CODEX_MODEL"
 run_cli config set env.vars.SELF_IMPROVE_CODEX_HOME "$SELF_IMPROVE_CODEX_HOME"
 run_cli config set env.vars.SELF_IMPROVE_CODEX_HOME_HOST "$SELF_IMPROVE_CODEX_HOME_HOST"
+run_cli config set env.vars.SELF_IMPROVE_CODEX_TIMEOUT_SEC "\"$SELF_IMPROVE_CODEX_TIMEOUT_SEC\"" --strict-json
+run_cli config set env.vars.SELF_IMPROVE_INSTALL_TIMEOUT_SEC "\"$SELF_IMPROVE_INSTALL_TIMEOUT_SEC\"" --strict-json
+run_cli config set env.vars.SELF_IMPROVE_CHECK_TIMEOUT_SEC "\"$SELF_IMPROVE_CHECK_TIMEOUT_SEC\"" --strict-json
+run_cli config set env.vars.SELF_IMPROVE_BUILD_TIMEOUT_SEC "\"$SELF_IMPROVE_BUILD_TIMEOUT_SEC\"" --strict-json
 
 mkdir -p "$(dirname "$APPROVALS_FILE")"
 if [[ ! -f "$APPROVALS_FILE" ]]; then
@@ -124,6 +134,7 @@ Quick verify:
   docker compose run --rm -T openclaw-cli config get commands.allowFrom.whatsapp
   docker compose run --rm -T openclaw-cli config get tools.elevated.allowFrom.whatsapp
   docker compose run --rm -T openclaw-cli config get tools.exec.ask
+  docker compose run --rm -T openclaw-cli config get tools.exec.timeoutSec
   docker compose run --rm -T openclaw-cli config get approvals.exec.targets
   cat $APPROVALS_FILE
 EOF

@@ -1,5 +1,7 @@
 services:
   openclaw-gateway:
+    group_add:
+      - "${DOCKER_SOCK_GID:-988}"
     environment:
       GH_TOKEN: ${GH_TOKEN}
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,8 +11,13 @@ services:
       - /mnt/openclaw/host-tools/ops:/opt/host-tools/ops
       - /mnt/openclaw/host-tools/runs:/opt/host-tools/runs
       - /opt/openclaw:/opt/openclaw-host
+      - /usr/bin/docker:/usr/local/bin/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /:/host:ro
 
   openclaw-cli:
+    group_add:
+      - "${DOCKER_SOCK_GID:-988}"
     environment:
       GH_TOKEN: ${GH_TOKEN}
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -20,3 +27,6 @@ services:
       - /mnt/openclaw/host-tools/ops:/opt/host-tools/ops
       - /mnt/openclaw/host-tools/runs:/opt/host-tools/runs
       - /opt/openclaw:/opt/openclaw-host
+      - /usr/bin/docker:/usr/local/bin/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /:/host:ro

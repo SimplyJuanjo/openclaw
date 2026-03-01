@@ -15,6 +15,10 @@ GH_BIN="${SELF_IMPROVE_GH_BIN:-gh}"
 INSTALL_CMD="${SELF_IMPROVE_INSTALL_CMD:-pnpm install --frozen-lockfile}"
 CHECK_CMD="${SELF_IMPROVE_CHECK_CMD:-pnpm check}"
 BUILD_CMD="${SELF_IMPROVE_BUILD_CMD:-pnpm build}"
+CODEX_TIMEOUT_SEC="${SELF_IMPROVE_CODEX_TIMEOUT_SEC:-5400}"
+INSTALL_TIMEOUT_SEC="${SELF_IMPROVE_INSTALL_TIMEOUT_SEC:-3600}"
+CHECK_TIMEOUT_SEC="${SELF_IMPROVE_CHECK_TIMEOUT_SEC:-3600}"
+BUILD_TIMEOUT_SEC="${SELF_IMPROVE_BUILD_TIMEOUT_SEC:-5400}"
 BASE_REF="${SELF_IMPROVE_BASE_REF:-upstream/main}"
 BASE_BRANCH="${SELF_IMPROVE_BASE_BRANCH:-main}"
 UPSTREAM_REPO="${SELF_IMPROVE_UPSTREAM_REPO:-openclaw/openclaw}"
@@ -171,10 +175,11 @@ log() {
 }
 
 run_in_repo() {
-  local command_text="$1"
+  local timeout_sec="$1"
+  local command_text="$2"
   (
     cd "$RUN_REPO_DIR"
-    bash -lc "$command_text"
+    run_with_timeout "$timeout_sec" bash -lc "$command_text"
   )
 }
 
@@ -222,6 +227,16 @@ ensure_codex_home_access() {
     fail "Codex home is not writable: $CODEX_HOME_DIR. Repair on host: sudo chown -R 1000:1000 $CODEX_HOME_HOST_DIR && sudo chmod -R u+rwX,go-rwx $CODEX_HOME_HOST_DIR"
   fi
   rm -f "$probe_path"
+}
+
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  if [[ "$timeout_sec" =~ ^[0-9]+$ ]] && ((timeout_sec > 0)); then
+    timeout --foreground --signal=TERM --kill-after=30s "${timeout_sec}s" "$@"
+    return
+  fi
+  "$@"
 }
 
 write_prompt() {
@@ -345,6 +360,7 @@ worker_main() {
   require_cmd dd
   require_cmd od
   require_cmd bash
+  require_cmd timeout
   require_cmd "$CODEX_BIN"
   require_cmd "$GH_BIN"
   ensure_codex_home_access
@@ -409,7 +425,7 @@ worker_main() {
   fi
   (
     cd "$RUN_REPO_DIR"
-    "$CODEX_BIN" "${codex_args[@]}" "$prompt_text"
+    run_with_timeout "$CODEX_TIMEOUT_SEC" "$CODEX_BIN" "${codex_args[@]}" "$prompt_text"
   )
 
   local post_codex_head_sha
@@ -437,22 +453,22 @@ worker_main() {
 
   RUN_SUMMARY="Installing dependencies."
   write_metadata
-  log "Running install command: $INSTALL_CMD"
-  run_in_repo "$INSTALL_CMD"
+  log "Running install command: $INSTALL_CMD (timeout=${INSTALL_TIMEOUT_SEC}s)"
+  run_in_repo "$INSTALL_TIMEOUT_SEC" "$INSTALL_CMD"
 
   RUN_CHECK_STATUS="running"
   RUN_SUMMARY="Running checks."
   write_metadata
-  log "Running check command: $CHECK_CMD"
-  run_in_repo "$CHECK_CMD"
+  log "Running check command: $CHECK_CMD (timeout=${CHECK_TIMEOUT_SEC}s)"
+  run_in_repo "$CHECK_TIMEOUT_SEC" "$CHECK_CMD"
   RUN_CHECK_STATUS="passed"
   write_metadata
 
   RUN_BUILD_STATUS="running"
   RUN_SUMMARY="Running build."
   write_metadata
-  log "Running build command: $BUILD_CMD"
-  run_in_repo "$BUILD_CMD"
+  log "Running build command: $BUILD_CMD (timeout=${BUILD_TIMEOUT_SEC}s)"
+  run_in_repo "$BUILD_TIMEOUT_SEC" "$BUILD_CMD"
   RUN_BUILD_STATUS="passed"
   write_metadata
 

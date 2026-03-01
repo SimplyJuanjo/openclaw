@@ -51,6 +51,12 @@ Copy the override into your compose stack and recreate:
 ```bash
 cd /opt/openclaw
 cp notes/hetzner-setup/self-improve/docker-compose.self-improve.override.yml ./docker-compose.self-improve.override.yml
+gid="$(stat -c %g /var/run/docker.sock)"
+if rg -q '^DOCKER_SOCK_GID=' .env; then
+  sed -i -E "s/^DOCKER_SOCK_GID=.*/DOCKER_SOCK_GID=${gid}/" .env
+else
+  printf '\nDOCKER_SOCK_GID=%s\n' "$gid" >> .env
+fi
 docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml up -d --build
 ```
 
@@ -60,6 +66,10 @@ Container validation:
 cd /opt/openclaw
 docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml exec -T openclaw-gateway \
   /opt/host-tools/npm-global/bin/codex --version
+docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml exec -T openclaw-gateway \
+  sh -lc 'docker --version && test -S /var/run/docker.sock && echo docker-sock-ok'
+docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml exec -T openclaw-gateway \
+  sh -lc 'test -d /host && echo host-mount-ok && ip -V'
 docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml exec -T openclaw-gateway \
   sh -lc 'test -w /opt/openclaw-host && echo rw-ok'
 ```
@@ -120,6 +130,7 @@ This applies:
 - `tools.elevated.allowFrom.whatsapp=[owner]`
 - `tools.exec.security=full`
 - `tools.exec.ask=off`
+- `tools.exec.timeoutSec=7200`
 - `approvals.exec.enabled=false`
 - Pins `codex-cli` and `codex-dev` to `/opt/host-tools/npm-global/bin/codex`
 - Ensures `codex-dev` runs with `--sandbox workspace-write`
@@ -163,8 +174,8 @@ bash notes/hetzner-setup/self-improve/deploy-self-improve-update.sh +346XXXXXXXX
 
 That runbook includes:
 
-- Rebuild with `OPENCLAW_DOCKER_APT_PACKAGES="git gh jq"` so `gh` stays available.
-- Compose file set for recreate.
+- Rebuild with `OPENCLAW_DOCKER_APT_PACKAGES="git gh jq iproute2 iputils-ping dnsutils net-tools curl"` so host-debug tools stay available.
+- Compose file set for recreate (including `docker.sock` + `/host` mounts for debugging).
 - Hands-free reapply command after every update.
 - Post-update smoke checks.
 

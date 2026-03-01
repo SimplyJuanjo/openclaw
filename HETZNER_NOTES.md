@@ -18,6 +18,7 @@
   - `todoist-ts-cli` installed in `/mnt/openclaw/host-tools/npm-global`.
   - Compose override exposes that binary path for gateway/cli containers.
   - Skill uses workspace `todoist` with `primaryEnv=TODOIST_API_TOKEN`.
+- `gog` is mounted persistently into containers at `/usr/local/bin/gog` (host source: `/mnt/openclaw/host-tools/npm-global/bin/gog`).
 
 ## Incident Log
 

@@ -7,6 +7,7 @@ services:
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - /mnt/openclaw/host-tools/npm-global:/opt/host-tools/npm-global
+      - /mnt/openclaw/host-tools/npm-global/bin/gog:/usr/local/bin/gog:ro
       - /mnt/openclaw/host-tools/codex-home:/home/node/.codex
       - /mnt/openclaw/host-tools/ops:/opt/host-tools/ops
       - /mnt/openclaw/host-tools/runs:/opt/host-tools/runs
@@ -23,6 +24,7 @@ services:
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - /mnt/openclaw/host-tools/npm-global:/opt/host-tools/npm-global
+      - /mnt/openclaw/host-tools/npm-global/bin/gog:/usr/local/bin/gog:ro
       - /mnt/openclaw/host-tools/codex-home:/home/node/.codex
       - /mnt/openclaw/host-tools/ops:/opt/host-tools/ops
       - /mnt/openclaw/host-tools/runs:/opt/host-tools/runs

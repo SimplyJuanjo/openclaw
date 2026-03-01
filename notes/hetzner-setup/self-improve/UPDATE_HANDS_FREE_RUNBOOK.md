@@ -96,6 +96,9 @@ Expected:
 - `gh --version` works in container.
 - `tools.exec.security` is `full`.
 - `tools.exec.ask` is `off`.
+- `agents.defaults.cliBackends.codex-cli.command` points to `/opt/host-tools/npm-global/bin/codex`.
+- `agents.defaults.cliBackends.codex-dev.args` contains `--sandbox workspace-write`.
+- `env.vars.SELF_IMPROVE_CODEX_BIN` / `SELF_IMPROVE_CODEX_MODEL` are present.
 
 ## 5) WhatsApp validation
 
@@ -191,4 +194,12 @@ docker compose \
   -f docker-compose.override.yml \
   -f docker-compose.self-improve.override.yml \
   logs --tail=200 openclaw-gateway | rg -i "approval|exec-approvals|EACCES|permission|denied"
+```
+
+If Codex fails with `Permission denied` on `/home/node/.codex/*`, repair host
+ownership and perms (then restart/retry):
+
+```bash
+sudo chown -R 1000:1000 /mnt/openclaw/host-tools/codex-home
+sudo chmod -R u+rwX,go-rwx /mnt/openclaw/host-tools/codex-home
 ```

@@ -121,6 +121,10 @@ This applies:
 - `tools.exec.security=full`
 - `tools.exec.ask=off`
 - `approvals.exec.enabled=false`
+- Pins `codex-cli` and `codex-dev` to `/opt/host-tools/npm-global/bin/codex`
+- Ensures `codex-dev` runs with `--sandbox workspace-write`
+- Sets durable runner env vars (`SELF_IMPROVE_CODEX_*`)
+- Repairs `codex-home` ownership/perms best-effort (`1000:1000`, private perms)
 - Regenerates `exec-approvals.json` cleanly (remove stale/locked file cases)
 
 ## 6) Runner usage from WhatsApp
@@ -163,6 +167,10 @@ That runbook includes:
 - Compose file set for recreate.
 - Hands-free reapply command after every update.
 - Post-update smoke checks.
+
+`self-improve` also auto-applies git `safe.directory` entries for
+`/opt/openclaw-host` and the per-run clone, so local-clone ownership mismatches
+do not block runs after recreate.
 
 ## Status contract
 

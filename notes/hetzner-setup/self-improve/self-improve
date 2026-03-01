@@ -9,6 +9,8 @@ WORK_DIR="${SELF_IMPROVE_WORK_DIR:-${RUNS_DIR}/work}"
 LOCK_FILE="${SELF_IMPROVE_LOCK_FILE:-${RUNS_DIR}/self-improve.lock}"
 REPO_SOURCE_DIR="${SELF_IMPROVE_REPO_SOURCE_DIR:-/opt/openclaw-host}"
 CODEX_BIN="${SELF_IMPROVE_CODEX_BIN:-/opt/host-tools/npm-global/bin/codex}"
+CODEX_HOME_DIR="${SELF_IMPROVE_CODEX_HOME:-${CODEX_HOME:-/home/node/.codex}}"
+CODEX_HOME_HOST_DIR="${SELF_IMPROVE_CODEX_HOME_HOST:-/mnt/openclaw/host-tools/codex-home}"
 GH_BIN="${SELF_IMPROVE_GH_BIN:-gh}"
 INSTALL_CMD="${SELF_IMPROVE_INSTALL_CMD:-pnpm install --frozen-lockfile}"
 CHECK_CMD="${SELF_IMPROVE_CHECK_CMD:-pnpm check}"
@@ -185,6 +187,43 @@ git_run() {
   git "${safe_args[@]}" "$@"
 }
 
+append_git_safe_dir() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 0
+  local existing
+  for existing in "${GIT_SAFE_DIRS[@]}"; do
+    if [[ "$existing" == "$dir" ]]; then
+      return 0
+    fi
+  done
+  GIT_SAFE_DIRS+=("$dir")
+}
+
+ensure_git_safe_directory_global() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 0
+  if git config --global --get-all safe.directory 2>/dev/null | grep -Fxq "$dir"; then
+    return 0
+  fi
+  git config --global --add safe.directory "$dir"
+}
+
+ensure_codex_home_access() {
+  [[ -d "$CODEX_HOME_DIR" ]] || fail "Codex home not found: $CODEX_HOME_DIR"
+  [[ -r "$CODEX_HOME_DIR/auth.json" ]] || fail "Codex auth is missing/unreadable: $CODEX_HOME_DIR/auth.json"
+  if [[ -f "$CODEX_HOME_DIR/config.toml" && ! -r "$CODEX_HOME_DIR/config.toml" ]]; then
+    fail "Codex config is unreadable: $CODEX_HOME_DIR/config.toml. Repair on host: sudo chown -R 1000:1000 $CODEX_HOME_HOST_DIR && sudo chmod -R u+rwX,go-rwx $CODEX_HOME_HOST_DIR"
+  fi
+  if [[ -f "$CODEX_HOME_DIR/history.jsonl" && ! -w "$CODEX_HOME_DIR/history.jsonl" ]]; then
+    fail "Codex history is not writable: $CODEX_HOME_DIR/history.jsonl. Repair on host: sudo chown -R 1000:1000 $CODEX_HOME_HOST_DIR && sudo chmod -R u+rwX,go-rwx $CODEX_HOME_HOST_DIR"
+  fi
+  local probe_path="$CODEX_HOME_DIR/.self-improve-write-test.$$"
+  if ! ( : >"$probe_path" ) 2>/dev/null; then
+    fail "Codex home is not writable: $CODEX_HOME_DIR. Repair on host: sudo chown -R 1000:1000 $CODEX_HOME_HOST_DIR && sudo chmod -R u+rwX,go-rwx $CODEX_HOME_HOST_DIR"
+  fi
+  rm -f "$probe_path"
+}
+
 write_prompt() {
   local prompt_path="$1"
   cat >"$prompt_path" <<EOF
@@ -308,6 +347,7 @@ worker_main() {
   require_cmd bash
   require_cmd "$CODEX_BIN"
   require_cmd "$GH_BIN"
+  ensure_codex_home_access
 
   [[ -d "$REPO_SOURCE_DIR/.git" ]] || fail "Repository not found at $REPO_SOURCE_DIR"
   [[ -n "${GH_TOKEN:-}" ]] || fail "GH_TOKEN is not set. Export GH_TOKEN in gateway runtime."
@@ -315,7 +355,11 @@ worker_main() {
   local origin_url
   local upstream_url
   local origin_owner
-  GIT_SAFE_DIRS=("$REPO_SOURCE_DIR" "$REPO_SOURCE_DIR/.git")
+  GIT_SAFE_DIRS=()
+  append_git_safe_dir "$REPO_SOURCE_DIR"
+  append_git_safe_dir "$REPO_SOURCE_DIR/.git"
+  ensure_git_safe_directory_global "$REPO_SOURCE_DIR"
+  ensure_git_safe_directory_global "$REPO_SOURCE_DIR/.git"
   origin_url="$(git_run -C "$REPO_SOURCE_DIR" remote get-url origin)"
   upstream_url="$(git_run -C "$REPO_SOURCE_DIR" remote get-url upstream)"
   origin_owner="$(parse_github_owner "$origin_url")" || fail "Cannot parse GitHub owner from origin URL: $origin_url"
@@ -328,7 +372,10 @@ worker_main() {
   write_metadata
   log "Cloning from $REPO_SOURCE_DIR to $RUN_REPO_DIR."
   git_run clone --quiet "$REPO_SOURCE_DIR" "$RUN_REPO_DIR"
-  GIT_SAFE_DIRS+=("$RUN_REPO_DIR" "$RUN_REPO_DIR/.git")
+  append_git_safe_dir "$RUN_REPO_DIR"
+  append_git_safe_dir "$RUN_REPO_DIR/.git"
+  ensure_git_safe_directory_global "$RUN_REPO_DIR"
+  ensure_git_safe_directory_global "$RUN_REPO_DIR/.git"
 
   git_run -C "$RUN_REPO_DIR" remote remove origin
   git_run -C "$RUN_REPO_DIR" remote add origin "$origin_url"

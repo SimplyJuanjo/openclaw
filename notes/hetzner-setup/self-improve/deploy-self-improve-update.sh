@@ -27,14 +27,18 @@ require_cmd cp
 require_cmd mkdir
 require_cmd date
 require_cmd bash
+require_cmd install
 
 SELF_IMPROVE_DIR="${COMPOSE_DIR}/notes/hetzner-setup/self-improve"
 HANDS_FREE_SCRIPT="${SELF_IMPROVE_DIR}/apply-owner-handsfree.sh"
 OVERRIDE_SOURCE="${SELF_IMPROVE_DIR}/docker-compose.self-improve.override.yml"
 OVERRIDE_TARGET="${COMPOSE_DIR}/docker-compose.self-improve.override.yml"
+RUNNER_SOURCE="${SELF_IMPROVE_DIR}/self-improve"
+RUNNER_TARGET="/mnt/openclaw/host-tools/ops/self-improve"
 
 [[ -f "$HANDS_FREE_SCRIPT" ]] || fail "Missing script: $HANDS_FREE_SCRIPT"
 [[ -f "$OVERRIDE_SOURCE" ]] || fail "Missing compose override source: $OVERRIDE_SOURCE"
+[[ -f "$RUNNER_SOURCE" ]] || fail "Missing runner source: $RUNNER_SOURCE"
 
 compose_files=(-f docker-compose.yml)
 [[ -f "${COMPOSE_DIR}/docker-compose.override.yml" ]] &&
@@ -87,6 +91,11 @@ if [[ ! " ${compose_files[*]} " =~ " -f docker-compose.self-improve.override.yml
   compose_files+=(-f docker-compose.self-improve.override.yml)
 fi
 
+step "Sync self-improve runner"
+mkdir -p "$(dirname "$RUNNER_TARGET")"
+install -m 0755 "$RUNNER_SOURCE" "$RUNNER_TARGET"
+chown 1000:1000 "$RUNNER_TARGET" 2>/dev/null || true
+
 if [[ "$SKIP_BUILD" != "1" ]]; then
   step "Build image with required apt packages: $APT_PACKAGES"
   (
@@ -110,6 +119,11 @@ compose exec -T openclaw-gateway \
   sh -lc '/opt/host-tools/npm-global/bin/codex --version && gh --version'
 compose run --rm -T openclaw-cli config get tools.exec.security
 compose run --rm -T openclaw-cli config get tools.exec.ask
+compose run --rm -T openclaw-cli config get tools.exec.pathPrepend
+compose run --rm -T openclaw-cli config get agents.defaults.cliBackends.codex-cli.command
+compose run --rm -T openclaw-cli config get agents.defaults.cliBackends.codex-dev.args
+compose run --rm -T openclaw-cli config get env.vars.SELF_IMPROVE_CODEX_BIN
+compose run --rm -T openclaw-cli config get env.vars.SELF_IMPROVE_CODEX_MODEL
 
 echo
 echo "Done."

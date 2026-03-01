@@ -4,6 +4,7 @@ services:
       - "${DOCKER_SOCK_GID:-988}"
     environment:
       GH_TOKEN: ${GH_TOKEN}
+      XDG_CONFIG_HOME: /home/node/.openclaw
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - /mnt/openclaw/host-tools/npm-global:/opt/host-tools/npm-global
@@ -21,6 +22,7 @@ services:
       - "${DOCKER_SOCK_GID:-988}"
     environment:
       GH_TOKEN: ${GH_TOKEN}
+      XDG_CONFIG_HOME: /home/node/.openclaw
       PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - /mnt/openclaw/host-tools/npm-global:/opt/host-tools/npm-global

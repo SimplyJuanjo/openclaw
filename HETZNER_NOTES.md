@@ -19,6 +19,7 @@
   - Compose override exposes that binary path for gateway/cli containers.
   - Skill uses workspace `todoist` with `primaryEnv=TODOIST_API_TOKEN`.
 - `gog` is mounted persistently into containers at `/usr/local/bin/gog` (host source: `/mnt/openclaw/host-tools/npm-global/bin/gog`).
+- `gog` keyring is configured to persistent file backend (`/home/node/.openclaw/gogcli/config.json`) and `GOG_KEYRING_PASSWORD` is stored in OpenClaw config env.
 
 ## Incident Log
 
@@ -81,6 +82,16 @@ cd /opt/openclaw
 tok="$(jq -r '.env.vars.TODOIST_API_TOKEN // empty' /mnt/openclaw/.openclaw/openclaw.json)"
 docker compose $CF exec -T -e TODOIST_API_TOKEN="$tok" openclaw-gateway \
   sh -c 'todoist today >/dev/null && echo TODOIST_AUTH_OK'
+```
+
+`gog` status probe (expected keyring backend `file`):
+
+```bash
+cd /opt/openclaw
+gpass="$(jq -r '.env.vars.GOG_KEYRING_PASSWORD // empty' /mnt/openclaw/.openclaw/openclaw.json)"
+docker compose $CF run --rm -T -e GOG_KEYRING_PASSWORD="$gpass" --entrypoint sh openclaw-cli \
+  -lc 'gog auth status --json | jq .keyring'
+unset gpass
 ```
 
 ## Persistence Notes

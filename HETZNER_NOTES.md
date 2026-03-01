@@ -87,3 +87,36 @@ One-shot updater (recommended):
 cd /opt/openclaw
 bash notes/hetzner-setup/self-improve/deploy-self-improve-update.sh +346XXXXXXXX
 ```
+
+## Todoist CLI Persistence (Update-Safe)
+
+Do not bake `todoist-ts-cli` into the image. Install it in host-tools so it survives
+pulls and rebuilds:
+
+```bash
+cd /opt/openclaw
+npm install -g --prefix /mnt/openclaw/host-tools/npm-global "todoist-ts-cli@^0.2.0"
+```
+
+`PATH` is defined in `notes/hetzner-setup/self-improve/docker-compose.self-improve.override.yml`.
+After updates, copy it again to compose root before recreate:
+
+```bash
+cd /opt/openclaw
+cp notes/hetzner-setup/self-improve/docker-compose.self-improve.override.yml \
+  ./docker-compose.self-improve.override.yml
+```
+
+Expected `PATH` in that override for `openclaw-gateway` and `openclaw-cli`:
+
+```yaml
+PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+Post-update sanity check:
+
+```bash
+cd /opt/openclaw
+docker compose -f docker-compose.yml -f docker-compose.self-improve.override.yml \
+  exec -T openclaw-gateway sh -lc 'which todoist && todoist --version'
+```

@@ -110,7 +110,55 @@ Expected:
 - Runs directly without `/approve`.
 - Returns status JSON from runner.
 
-## 6) If exec gets stuck again
+## 6) Keep Todoist CLI update-safe (no Dockerfile edits)
+
+Install `todoist-ts-cli` on the host-tools prefix (persistent across image rebuilds):
+
+```bash
+cd /opt/openclaw
+npm install -g --prefix /mnt/openclaw/host-tools/npm-global "todoist-ts-cli@^0.2.0"
+```
+
+Ensure the gateway/container `PATH` includes host-tools bin. It is already defined in:
+
+- `notes/hetzner-setup/self-improve/docker-compose.self-improve.override.yml`
+
+Copy that file to compose root before recreate:
+
+```bash
+cd /opt/openclaw
+cp notes/hetzner-setup/self-improve/docker-compose.self-improve.override.yml \
+  ./docker-compose.self-improve.override.yml
+```
+
+Expected `PATH` entries in that override:
+
+```yaml
+services:
+  openclaw-gateway:
+    environment:
+      PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  openclaw-cli:
+    environment:
+      PATH: /opt/host-tools/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+Then recreate using the same compose stack you normally use.
+
+Quick verify after any update:
+
+```bash
+cd /opt/openclaw
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.self-improve.override.yml \
+  exec -T openclaw-gateway \
+  sh -lc 'which todoist && todoist --version'
+```
+
+If this passes, Todoist skill dependencies survived the update.
+
+## 7) If exec gets stuck again
 
 Run:
 

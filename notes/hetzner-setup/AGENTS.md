@@ -1,4 +1,4 @@
-# Hetzner + OpenClaw Tracking
+![1772199724238](image/AGENTS/1772199724238.png)![1772199730205](image/AGENTS/1772199730205.png)![1772199731706](image/AGENTS/1772199731706.png)# Hetzner + OpenClaw Tracking
 
 ## Purpose
 
@@ -133,6 +133,7 @@ Update this file after each relevant session.
 - reapply hands-free profile
 - run smoke checks (`codex`, `gh`, exec policy keys)
 - Added `deploy-self-improve-update.sh` one-shot command for update + rebuild + profile reapply + smoke checks.
+- Documented update-safe Todoist CLI pattern: install `todoist-ts-cli` under `/mnt/openclaw/host-tools/npm-global` and expose it via compose `PATH`, avoiding Dockerfile drift.
 
 ### Entry Template
 
